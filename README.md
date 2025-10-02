@@ -1,2 +1,2 @@
 # public-docs
-docuemtos para compartir
+Documentos para compartir publicamente
