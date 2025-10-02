@@ -251,7 +251,7 @@ DATABASE_FILE = os.path.join(SERVER_ROOT, 'database-staging.db')
 | **Base de Datos** | SQLite | **PostgreSQL 15** | ACID completo, concurrencia, replicación |
 | **Caché** | Variables globales | **Redis 7** | Persistente, distribuido, pub/sub para real-time |
 | **Queue System** | N/A | **Celery** + Redis | Tareas asíncronas, retry automático, monitoring |
-| **Frontend Build** | N/A | **Vite** + Vue.js 3 | Hot reload, tree-shaking, TypeScript |
+| **Frontend Build** | N/A | **Vite** + (Vue.js 3 o ReactJS) | Hot reload, tree-shaking, TypeScript |
 | **Containerización** | Systemd | **Docker** + Docker Compose | Entornos reproducibles, fácil deployment |
 | **Monitoring** | N/A | **Prometheus** + Grafana | Métricas, alertas, dashboards |
 | **Error Tracking** | Logs manuales | **Sentry** | Tracking automático de errores, stack traces |
