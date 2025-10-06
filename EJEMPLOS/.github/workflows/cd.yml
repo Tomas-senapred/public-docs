@@ -1,0 +1,378 @@
+# Workflow de Despliegue Continuo (CD)
+# Se ejecuta cuando se hace merge a main o develop
+
+name: CD - Continuous Deployment
+
+on:
+  push:
+    branches:
+      - main       # Producción
+      - develop    # Staging/Development
+  workflow_dispatch:  # Permite ejecución manual
+    inputs:
+      environment:
+        description: 'Ambiente a deployar'
+        required: true
+        type: choice
+        options:
+          - staging
+          - production
+
+jobs:
+  # Job 1: Determinar ambiente
+  setup:
+    name: Configurar Deployment
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.set-env.outputs.environment }}
+      version: ${{ steps.version.outputs.version }}
+    
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determinar ambiente
+        id: set-env
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "environment=production" >> $GITHUB_OUTPUT
+          else
+            echo "environment=staging" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generar versión
+        id: version
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            # Para producción, usar tags semver
+            VERSION=$(git describe --tags --abbrev=0 2>/dev/null || echo "v1.0.0")
+          else
+            # Para staging, usar hash del commit
+            VERSION="dev-$(git rev-parse --short HEAD)"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "📦 Versión: $VERSION"
+
+  # Job 2: Build de Docker
+  build-docker:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: setup
+    
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login a Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Login a GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extraer metadata para Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ secrets.DOCKER_USERNAME }}/nombre-proyecto
+            ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=${{ needs.setup.outputs.version }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build y Push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VERSION=${{ needs.setup.outputs.version }}
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            GIT_COMMIT=${{ github.sha }}
+
+  # Job 3: Deploy a Staging
+  deploy-staging:
+    name: 🚀 Deploy a Staging
+    runs-on: ubuntu-latest
+    needs: [setup, build-docker]
+    if: needs.setup.outputs.environment == 'staging'
+    environment:
+      name: staging
+      url: https://staging.tu-proyecto.com
+    
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar kubectl
+        uses: azure/k8s-set-context@v3
+        with:
+          method: kubeconfig
+          kubeconfig: ${{ secrets.KUBE_CONFIG_STAGING }}
+
+      - name: Deploy a Kubernetes (Staging)
+        run: |
+          kubectl set image deployment/app-staging \
+            app=${{ secrets.DOCKER_USERNAME }}/nombre-proyecto:${{ needs.setup.outputs.version }} \
+            -n staging
+          kubectl rollout status deployment/app-staging -n staging
+
+      - name: Verificar deployment
+        run: |
+          kubectl get pods -n staging
+          kubectl get services -n staging
+
+      - name: Health check
+        run: |
+          sleep 10
+          curl -f https://staging.tu-proyecto.com/health || exit 1
+
+      - name: Notificar a Slack
+        if: always()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "Deploy a Staging: ${{ job.status }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Deploy a Staging*\n*Estado:* ${{ job.status }}\n*Versión:* ${{ needs.setup.outputs.version }}\n*Commit:* ${{ github.sha }}\n*URL:* https://staging.tu-proyecto.com"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+  # Job 4: Tests de smoke en Staging
+  smoke-tests-staging:
+    name: Tests de Smoke (Staging)
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Ejecutar smoke tests
+        run: npm run test:smoke
+        env:
+          BASE_URL: https://staging.tu-proyecto.com
+          API_KEY: ${{ secrets.STAGING_API_KEY }}
+
+  # Job 5: Deploy a Producción
+  deploy-production:
+    name: 🚀 Deploy a Producción
+    runs-on: ubuntu-latest
+    needs: [setup, build-docker]
+    if: needs.setup.outputs.environment == 'production'
+    environment:
+      name: production
+      url: https://tu-proyecto.com
+    
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar kubectl
+        uses: azure/k8s-set-context@v3
+        with:
+          method: kubeconfig
+          kubeconfig: ${{ secrets.KUBE_CONFIG_PRODUCTION }}
+
+      - name: Backup de base de datos
+        run: |
+          echo "🗄️ Creando backup de base de datos..."
+          # Comando para crear backup según tu infraestructura
+          # kubectl exec -n production deployment/postgres -- pg_dump ...
+
+      - name: Deploy a Kubernetes (Production)
+        run: |
+          kubectl set image deployment/app-production \
+            app=${{ secrets.DOCKER_USERNAME }}/nombre-proyecto:${{ needs.setup.outputs.version }} \
+            -n production
+          kubectl rollout status deployment/app-production -n production --timeout=5m
+
+      - name: Verificar deployment
+        run: |
+          kubectl get pods -n production
+          kubectl get services -n production
+
+      - name: Health check
+        run: |
+          sleep 15
+          for i in {1..5}; do
+            if curl -f https://tu-proyecto.com/health; then
+              echo "✅ Health check exitoso"
+              exit 0
+            fi
+            echo "⏳ Intento $i/5 falló, reintentando..."
+            sleep 5
+          done
+          echo "❌ Health check falló después de 5 intentos"
+          exit 1
+
+      - name: Ejecutar migraciones de base de datos
+        run: |
+          kubectl exec -n production deployment/app-production -- npm run db:migrate
+
+      - name: Tag de release en GitHub
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ needs.setup.outputs.version }}
+          release_name: Release ${{ needs.setup.outputs.version }}
+          body: |
+            ## Cambios en esta versión
+            
+            Deploy automático desde commit ${{ github.sha }}
+            
+            ### 📝 Commits incluidos
+            ${{ github.event.head_commit.message }}
+            
+            ### 🔗 Enlaces
+            - [Documentación](https://docs.tu-proyecto.com)
+            - [Changelog](CHANGELOG.md)
+          draft: false
+          prerelease: false
+
+      - name: Notificar a Slack
+        if: always()
+        uses: slackapi/slack-github-action@v1
+        with:
+          payload: |
+            {
+              "text": "🚀 Deploy a Producción: ${{ job.status }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Deploy a Producción*\n*Estado:* ${{ job.status }}\n*Versión:* ${{ needs.setup.outputs.version }}\n*Commit:* ${{ github.sha }}\n*URL:* https://tu-proyecto.com"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Notificar por email
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "❌ Deploy a Producción FALLÓ - ${{ github.repository }}"
+          body: |
+            El deploy a producción ha fallado.
+            
+            Commit: ${{ github.sha }}
+            Branch: ${{ github.ref }}
+            Actor: ${{ github.actor }}
+            
+            Revisa los logs en: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          to: devops@tu-organizacion.com
+          from: GitHub Actions
+
+  # Job 6: Tests de smoke en Producción
+  smoke-tests-production:
+    name: Tests de Smoke (Producción)
+    runs-on: ubuntu-latest
+    needs: deploy-production
+    
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Ejecutar smoke tests críticos
+        run: npm run test:smoke:critical
+        env:
+          BASE_URL: https://tu-proyecto.com
+          API_KEY: ${{ secrets.PRODUCTION_API_KEY }}
+
+      - name: Rollback si falla
+        if: failure()
+        run: |
+          echo "❌ Smoke tests fallaron, iniciando rollback..."
+          kubectl rollout undo deployment/app-production -n production
+
+  # Job 7: Monitoreo post-deployment
+  post-deployment-monitoring:
+    name: Monitoreo Post-Deployment
+    runs-on: ubuntu-latest
+    needs: [deploy-production, smoke-tests-production]
+    if: success()
+    
+    steps:
+      - name: Verificar métricas en Datadog/New Relic
+        run: |
+          echo "📊 Verificando métricas..."
+          # Comandos para verificar métricas según tu herramienta de monitoreo
+          
+      - name: Crear evento en Datadog
+        run: |
+          curl -X POST "https://api.datadoghq.com/api/v1/events" \
+            -H "Content-Type: application/json" \
+            -H "DD-API-KEY: ${{ secrets.DATADOG_API_KEY }}" \
+            -d '{
+              "title": "Deploy a Producción Exitoso",
+              "text": "Versión ${{ needs.setup.outputs.version }} deployada",
+              "tags": ["environment:production", "service:nombre-proyecto"]
+            }'
+
+# Nota: Este workflow asume que tienes configurado:
+# - Secrets: DOCKER_USERNAME, DOCKER_PASSWORD, KUBE_CONFIG_STAGING, KUBE_CONFIG_PRODUCTION
+# - Kubernetes clusters para staging y producción
+# - Dominios configurados: staging.tu-proyecto.com y tu-proyecto.com
+#
+# Adapta según tu infraestructura:
+# - AWS: Usa aws-actions/configure-aws-credentials
+# - Azure: Usa azure/login
+# - GCP: Usa google-github-actions/auth
+# - Heroku: Usa akhileshns/heroku-deploy
+# - Vercel: Usa amondnet/vercel-action
+# - Netlify: Usa nwtgck/actions-netlify

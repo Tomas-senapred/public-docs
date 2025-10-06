@@ -1,0 +1,339 @@
+# Workflow de Integración Continua (CI)
+# Se ejecuta en cada push y pull request a develop y main
+
+name: CI - Continuous Integration
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - develop
+      - main
+
+# Cancela workflows anteriores si hay nuevos commits
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Job 1: Lint y validación de código
+  lint:
+    name: Lint y Validación de Código
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Necesario para algunos linters
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Ejecutar ESLint
+        run: npm run lint
+
+      - name: Ejecutar Prettier (verificar formato)
+        run: npm run format:check
+        continue-on-error: false
+
+      - name: Validar tipos TypeScript
+        run: npm run type-check
+        if: hashFiles('tsconfig.json') != ''
+
+  # Job 2: Tests unitarios
+  test-unit:
+    name: Tests Unitarios
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [18, 20, 22]
+    
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Ejecutar tests unitarios
+        run: npm run test:unit
+
+      - name: Generar reporte de coverage
+        if: matrix.node-version == 20
+        run: npm run test:coverage
+
+      - name: Subir coverage a Codecov
+        if: matrix.node-version == 20
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage/lcov.info
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+
+  # Job 3: Tests de integración
+  test-integration:
+    name: Tests de Integración
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Ejecutar migraciones de base de datos
+        run: npm run db:migrate
+        env:
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
+          NODE_ENV: test
+
+      - name: Ejecutar tests de integración
+        run: npm run test:integration
+        env:
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
+          REDIS_URL: redis://localhost:6379
+          NODE_ENV: test
+
+  # Job 4: Tests E2E
+  test-e2e:
+    name: Tests End-to-End
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: test_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Instalar Playwright browsers
+        run: npx playwright install --with-deps
+
+      - name: Ejecutar migraciones y seed
+        run: |
+          npm run db:migrate
+          npm run db:seed:test
+        env:
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
+          NODE_ENV: test
+
+      - name: Build de la aplicación
+        run: npm run build
+
+      - name: Ejecutar tests E2E
+        run: npm run test:e2e
+        env:
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/test_db
+          NODE_ENV: test
+
+      - name: Subir artefactos de Playwright
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 30
+
+  # Job 5: Build
+  build:
+    name: Verificar Build
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Build de producción
+        run: npm run build
+
+      - name: Verificar tamaño del bundle
+        run: |
+          echo "📦 Tamaño del build:"
+          du -sh dist/
+          du -sh dist/* | sort -h
+
+      - name: Subir artefactos del build
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: dist/
+          retention-days: 7
+
+  # Job 6: Análisis de seguridad
+  security:
+    name: Análisis de Seguridad
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Ejecutar npm audit
+        run: npm audit --audit-level=moderate
+        continue-on-error: true
+
+      - name: Escanear dependencias con Snyk
+        uses: snyk/actions/node@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high
+
+      - name: Ejecutar CodeQL Analysis
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript, typescript
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Ejecutar CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+
+  # Job 7: Análisis de código con SonarCloud (opcional)
+  sonarcloud:
+    name: Análisis SonarCloud
+    runs-on: ubuntu-latest
+    needs: [test-unit]
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/develop'
+    
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Shallow clones should be disabled for SonarCloud
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Ejecutar tests con coverage
+        run: npm run test:coverage
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  # Job final: Reporte de estado
+  ci-success:
+    name: ✅ CI Exitoso
+    runs-on: ubuntu-latest
+    needs: [lint, test-unit, test-integration, test-e2e, build, security]
+    if: success()
+    
+    steps:
+      - name: Éxito
+        run: |
+          echo "✅ Todos los checks de CI pasaron exitosamente!"
+          echo "🎉 El código está listo para revisión o merge."
+
+  ci-failure:
+    name: ❌ CI Falló
+    runs-on: ubuntu-latest
+    needs: [lint, test-unit, test-integration, test-e2e, build, security]
+    if: failure()
+    
+    steps:
+      - name: Fallo
+        run: |
+          echo "❌ Algunos checks de CI fallaron."
+          echo "Por favor revisa los logs arriba para más detalles."
+          exit 1

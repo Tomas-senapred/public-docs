@@ -26,14 +26,6 @@ Template completo y detallado para documentar proyectos. Incluye estructura prof
 - Deployment y tecnologías utilizadas
 - Contribución, roadmap y contacto
 
-### [Plantilla de Issues](EJEMPLOS/PROPUESTA_ISSUES.md)
-Colección de templates estandarizados para crear issues de calidad en GitHub. Incluye:
-- Bug reports con información estructurada
-- Feature requests con criterios de aceptación
-- Templates para mejoras, documentación y refactoring
-- Reportes de performance y vulnerabilidades de seguridad
-- Guías de buenas prácticas y sistema de labels
-
 ### [Guía de Contribución](EJEMPLOS/CONTRIBUTING.md)
 Documento general que establece estándares y procesos para contribuir a proyectos. Este archivo **es bastante estándar** y requiere mínimas modificaciones entre proyectos. Incluye:
 - Código de conducta y comportamientos esperados
@@ -50,6 +42,55 @@ Documento general que establece estándares y procesos para contribuir a proyect
 - Ajustar herramientas de linting específicas del proyecto
 - Modificar requisitos de coverage de tests si es necesario
 - Adaptar ejemplos de comandos según el stack tecnológico
+
+### Carpeta [`.github/`](EJEMPLOS/.github/)
+Estructura completa de configuración para GitHub que incluye workflows de CI/CD y templates para colaboración. **Esta estructura se copia directamente a la raíz del proyecto.**
+
+#### [Workflows CI/CD](EJEMPLOS/.github/workflows/)
+Pipelines automatizados para integración y despliegue continuo:
+
+- **[`ci.yml`](EJEMPLOS/.github/workflows/ci.yml)** - Integración Continua
+  - Lint y validación de código
+  - Tests unitarios, integración y E2E
+  - Análisis de seguridad (npm audit, Snyk, CodeQL)
+  - Build y verificación de artefactos
+  - Coverage y análisis con SonarCloud
+  - Ejecuta en push y PR a `develop` y `main`
+
+- **[`cd.yml`](EJEMPLOS/.github/workflows/cd.yml)** - Despliegue Continuo
+  - Build y push de imágenes Docker
+  - Deploy automático a Staging (desde `develop`)
+  - Deploy automático a Producción (desde `main`)
+  - Smoke tests post-deployment
+  - Rollback automático si fallan las pruebas
+  - Notificaciones a Slack y email
+  - Monitoreo post-deployment
+
+**Personalización requerida:**
+- Configurar secrets en GitHub (Docker, Kubernetes, APIs)
+- Ajustar nombres de servicios y deployments
+- Adaptar según infraestructura (AWS, Azure, GCP, Heroku, etc.)
+- Modificar comandos de tests según el proyecto
+
+#### [Issue Templates](EJEMPLOS/.github/ISSUE_TEMPLATE/)
+
+- **[`PROPUESTA_ISSUES.md`](EJEMPLOS/.github/ISSUE_TEMPLATE/PROPUESTA_ISSUES.md)** - Guía completa con templates para:
+  - Bug reports con información estructurada
+  - Feature requests con criterios de aceptación
+  - Templates para mejoras, documentación y refactoring
+  - Reportes de performance y vulnerabilidades de seguridad
+  - Guías de buenas prácticas y sistema de labels
+  - Configuración de templates automáticos en GitHub
+
+#### [Pull Request Template](EJEMPLOS/.github/PULL_REQUEST_TEMPLATE.md)
+Template estandarizado para PRs con:
+- Descripción detallada de cambios
+- Checklist completo de validación
+- Sección de testing (automatizado y manual)
+- Screenshots/videos para cambios visuales
+- Notas para reviewers
+- Plan de deployment
+- Evaluación de riesgos
 
 ---
 
