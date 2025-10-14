@@ -94,7 +94,37 @@ Template estandarizado para PRs con:
 
 ---
 
-## 💡 Cómo Usar las Plantillas
+## �️ Estructura de Carpetas Organizacional
+
+### Organización Institucional
+El repositorio sigue la [estructura organizacional](Estructura_Carpetas.md) basada en 7 categorías principales que facilitan la gestión y localización de documentos institucionales:
+
+#### 📊 Categorías Principales
+- **1_Indicadores** - Indicadores institucionales por año (ADP, CDC, PMG)
+- **2_Convenios** - Colaboraciones, patrocinios y transferencias institucionales  
+- **3_Iniciativas Innovación** - Proyectos de innovación con documentación completa
+- **4_Repositorios** - Metodologías, publicaciones y reportería institucional
+- **5_Comité CCSEU y TD** - Documentación de sesiones y gestión de embajadores
+- **6_Proyectos Institucionales** - Proyectos y sub-iniciativas institucionales
+- **7_Docs Administrativos** - Documentación administrativa y presupuestaria
+
+#### 🏗️ Estructura Jerárquica
+```
+📁 Raíz
+├── 📂 1_Indicadores/2025/PMG/Transformación Digital
+├── 📂 2_Convenios/2025/Colaboraciones/<Institución>_<Proyecto>
+├── 📂 3_Iniciativas Innovación/<Iniciativa>/{Antecedentes,Desarrollo,Entregables}
+├── 📂 4_Repositorios/2025/Reportería/{BBDD,Informes de Gestión}
+├── 📂 5_Comité CCSEU y TD/2025/{Embajadores,<N° Sesión>}
+├── 📂 6_Proyectos Institucionales/<Proyecto>/<Sub-Iniciativa>
+└── 📂 7_Docs Administrativos/2025/{Formulación,Capacitación,Provisión}
+```
+
+> 📋 **Ver documentación completa**: [Estructura_Carpetas.md](Estructura_Carpetas.md)
+
+---
+
+## �💡 Cómo Usar las Plantillas
 
 1. **No copies todo**: Selecciona solo las secciones relevantes para tu proyecto
 2. **Adapta el contenido**: Personaliza ejemplos, comandos y tecnologías según tu stack
